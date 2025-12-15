@@ -1,0 +1,20 @@
+# Test your FastAPI endpoints
+####
+
+POST http://127.0.0.1:8000/white/predict
+Content-Type: application/json
+
+{
+  "fixed_acidity": 6.8,
+  "alcohol": 14.4,
+  "volatile_acidity": 0.28,
+  "citric_acid": 0.32,
+  "residual_sugar": 5.2,
+  "chlorides": 0.045,
+  "free_sulfur_dioxide": 34,
+  "density": 0.9937,
+  "pH": 3.18,
+  "sulphates": 0.47,
+  "total_sulfur_dioxide": 134
+}
+###
