@@ -2,8 +2,9 @@ fastapi
 uvicorn[standard]
 pandas
 joblib
-scikit-learn
+scikit-learn==1.5.2
 pydantic
-typing
+numpy
+imbalanced_learn
 matplotlib
 seaborn
