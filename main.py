@@ -11,8 +11,8 @@ LABELS = {0: "low", 1: "medium", 2: "high"}
 # Map logical model names to joblib files
 MODEL_FILES: Dict[str, str] = {
     "white": "models/final_finetuned_white.joblib",
-    # "red": "models/final_finetuned_red.joblib",
-    # "combined": "models/final_finetuned_combined.joblib",
+    "red": "models/final_finetuned_red.joblib",
+    "combined": "models/final_finetuned_combined.joblib",
 }
 
 # Load models at import/startup
@@ -59,3 +59,22 @@ def predict(
     pred = int(y_pred[0])
     label = LABELS.get(pred, "unknown")
     return {"model": model_name, "predicted_class": pred, "predicted_label": label}
+
+@app.post("/predict-all")
+def predict_all(sample: WineSample):
+    # Build DataFrame once
+    row = {f: getattr(sample, f) for f in FEATURES}
+    X = pd.DataFrame([row], columns=FEATURES)
+
+    results = []
+    for model_name, model in _models.items():
+        y_pred = model.predict(X)
+        pred = int(y_pred[0])
+        label = LABELS.get(pred, "unknown")
+        results.append({
+            "model": model_name,
+            "predicted_class": pred,
+            "predicted_label": label
+        })
+
+    return {"results": results}
