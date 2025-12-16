@@ -41,6 +41,14 @@ class WineSample(BaseModel):
     sulphates: float
     alcohol: float
 
+@app.get("/health")
+def health_check():
+    return {
+        "status": "healthy",
+        "models_loaded": list(_models.keys()),
+        "features": len(FEATURES) if FEATURES else 0
+    }
+
 @app.post("/{model_name}/predict")
 def predict(
     sample: WineSample,
