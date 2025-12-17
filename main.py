@@ -91,11 +91,17 @@ def predict_all(sample: WineSample):
     for model_name, model in _models.items():
         y_pred = model.predict(X)
         pred = int(y_pred[0])
+        probs = model.predict_proba(X)[0]
         label = LABELS.get(pred, "unknown")
+        confidence = float(probs[pred])
+
         results.append({
             "model": model_name,
             "predicted_class": pred,
-            "predicted_label": label
+            "predicted_label": label,
+            "confidence": confidence,
+            "probabilities": probs.tolist()
+
         })
 
     return {"results": results}
