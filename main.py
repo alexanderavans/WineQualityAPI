@@ -3,8 +3,17 @@ from pydantic import BaseModel, Field
 import joblib
 import pandas as pd
 from typing import Dict
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(title="Wine Quality API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 LABELS = {0: "low", 1: "medium", 2: "high"}
 
