@@ -38,7 +38,7 @@ for name, filepath in MODEL_FILES.items():
             raise RuntimeError(f"Feature mismatch between models: {name} differs")
 
 
-class WineSample(BaseModel, Field):
+class WineSample(BaseModel):
     fixed_acidity: float = Field(7.0, ge=0, description="Typical white wine acidity")
     volatile_acidity: float = Field(0.3, ge=0)
     citric_acid: float = Field(0.3, ge=0)
