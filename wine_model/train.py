@@ -3,42 +3,35 @@ Training script for Wine Quality Classification pipeline.
 Builds, trains, and exports the final Random Forest model.
 """
 
-import pandas as pd
 import numpy as np
-from joblib import dump
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.ensemble import (
-        RandomForestClassifier, ExtraTreesClassifier, GradientBoostingClassifier
-    )
-from sklearn.neighbors import KNeighborsClassifier
-from sklearn.svm import SVC
-from sklearn.naive_bayes import GaussianNB
-from sklearn.neural_network import MLPClassifier
-from sklearn.linear_model import LogisticRegression
-from sklearn.preprocessing import StandardScaler
-from sklearn.pipeline import Pipeline
+import pandas as pd
+import seaborn as sns
+from IPython.core.display_functions import display
+from imblearn.metrics import macro_averaged_mean_absolute_error
+from imblearn.over_sampling import SMOTE, BorderlineSMOTE, SVMSMOTE
 from imblearn.pipeline import Pipeline as ImbPipeline
-from imblearn.over_sampling import SMOTE
-from sklearn.model_selection import StratifiedKFold, RandomizedSearchCV, GridSearchCV
-from sklearn.preprocessing import StandardScaler
+from lightgbm import LGBMClassifier
+from matplotlib import pyplot as plt
+from scipy.stats import randint, uniform
+from sklearn.ensemble import ExtraTreesClassifier, GradientBoostingClassifier
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.pipeline import Pipeline
-from imblearn.pipeline import Pipeline as ImbPipeline
-from imblearn.over_sampling import SMOTE, BorderlineSMOTE, SVMSMOTE
-from scipy.stats import randint, uniform
-from sklearn.metrics import f1_score, classification_report
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.ensemble import ExtraTreesClassifier, GradientBoostingClassifier
-from sklearn.neighbors import KNeighborsClassifier
-from sklearn.svm import SVC
+from sklearn.metrics import f1_score, classification_report, confusion_matrix, accuracy_score, balanced_accuracy_score
+from sklearn.model_selection import RandomizedSearchCV, GridSearchCV
 from sklearn.naive_bayes import GaussianNB
-from sklearn.neural_network import MLPClassifier
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.svm import SVC
+from sklearn.tree import DecisionTreeClassifier
+
+from wine_model.preprocessing import plot_confusion
+
 
 def create_baseline_pipelines():
     """
     Creates baseline Random Forest and Logistic Regression pipelines
-    with and without SMOTE preprocessing.
+    without SMOTE preprocessing.
     
     Returns:
     --------
@@ -47,11 +40,11 @@ def create_baseline_pipelines():
     param_grids : dict
         Dictionary mapping model names to hyperparameter grids.
     """
-    
+
     models = {}
 
     # ========== ZONDER SMOTE ==========
-    
+
     # 1) Logistic Regression
     models["LogReg"] = Pipeline([
         ("scaler", StandardScaler()),
@@ -118,61 +111,22 @@ def create_baseline_pipelines():
         ("clf", GaussianNB()),
     ])
 
-    # 9) MLP
-    models["MLP"] = Pipeline([
-        ("scaler", StandardScaler()),
-        ("clf", MLPClassifier(
-            hidden_layer_sizes=(50,),
-            max_iter=500,
-            random_state=42,
+    # 9) LightGBM
+    models["LightGBM"] = Pipeline([
+        ("clf", LGBMClassifier(
+            objective="multiclass",
+            class_weight="balanced",
+            random_state=42
         )),
     ])
 
-    # ========== MET SMOTE ==========
-    
-    # Voor elk model: maak een SMOTE-variant (behalve NaiveBayes, die vaak slecht reageert op SMOTE)
-    base_models = ["LogReg", "RF", "DecisionTree", "ExtraTrees", "GradBoost", "KNN", "SVC", "MLP"]
-    
-    for base_name in base_models:
-        base_pipe = models[base_name]
-        smote_name = f"{base_name} + SMOTE"
-        
-        # Haal de stappen uit de originele pipeline
-        steps_with_smote = [("smote", SMOTE(random_state=42))]
-        for step_name, step_obj in base_pipe.named_steps.items():
-            # Bij SMOTE: class_weight uitschakelen (als het er is)
-            if step_name == "clf" and hasattr(step_obj, 'class_weight'):
-                new_params = step_obj.get_params()
-                new_params['class_weight'] = None
-                steps_with_smote.append((step_name, step_obj.__class__(**new_params)))
-            else:
-                steps_with_smote.append((step_name, step_obj.__class__(**step_obj.get_params())))
-        
-        models[smote_name] = ImbPipeline(steps=steps_with_smote)
-
-    # ========== PARAM GRIDS (voor GridSearch top-3) ==========
-    
     param_grids = {
         "LogReg": {
             "clf__C": [0.1, 1, 10, 100],
             "clf__penalty": ["l2"],
             "clf__solver": ["lbfgs"],
         },
-        "LogReg + SMOTE": {
-            "smote__k_neighbors": [3, 5],
-            "clf__C": [0.1, 1, 10, 100],
-            "clf__penalty": ["l2"],
-            "clf__solver": ["lbfgs"],
-        },
         "RF": {
-            "clf__n_estimators": [100, 300, 600],
-            "clf__max_depth": [None, 10, 20],
-            "clf__min_samples_split": [2, 5],
-            "clf__min_samples_leaf": [1, 2],
-            "clf__max_features": ["sqrt", "log2"],
-        },
-        "RF + SMOTE": {
-            "smote__k_neighbors": [3, 5],
             "clf__n_estimators": [100, 300, 600],
             "clf__max_depth": [None, 10, 20],
             "clf__min_samples_split": [2, 5],
@@ -185,22 +139,7 @@ def create_baseline_pipelines():
             "clf__min_samples_leaf": [1, 2, 4],
             "clf__criterion": ["gini", "entropy"],
         },
-        "DecisionTree + SMOTE": {
-            "smote__k_neighbors": [3, 5],
-            "clf__max_depth": [None, 5, 10, 20],
-            "clf__min_samples_split": [2, 5, 10],
-            "clf__min_samples_leaf": [1, 2, 4],
-            "clf__criterion": ["gini", "entropy"],
-        },
         "ExtraTrees": {
-            "clf__n_estimators": [100, 300, 600],
-            "clf__max_depth": [None, 10, 20],
-            "clf__min_samples_split": [2, 5],
-            "clf__min_samples_leaf": [1, 2],
-            "clf__max_features": ["sqrt", "log2"],
-        },
-        "ExtraTrees + SMOTE": {
-            "smote__k_neighbors": [3, 5],
             "clf__n_estimators": [100, 300, 600],
             "clf__max_depth": [None, 10, 20],
             "clf__min_samples_split": [2, 5],
@@ -213,20 +152,7 @@ def create_baseline_pipelines():
             "clf__max_depth": [2, 3, 4],
             "clf__subsample": [0.8, 1.0],
         },
-        "GradBoost + SMOTE": {
-            "smote__k_neighbors": [3, 5],
-            "clf__n_estimators": [100, 200, 300],
-            "clf__learning_rate": [0.05, 0.1, 0.2],
-            "clf__max_depth": [2, 3, 4],
-            "clf__subsample": [0.8, 1.0],
-        },
         "KNN": {
-            "clf__n_neighbors": [3, 5, 11],
-            "clf__weights": ["uniform", "distance"],
-            "clf__p": [1, 2],
-        },
-        "KNN + SMOTE": {
-            "smote__k_neighbors": [3, 5],
             "clf__n_neighbors": [3, 5, 11],
             "clf__weights": ["uniform", "distance"],
             "clf__p": [1, 2],
@@ -236,36 +162,24 @@ def create_baseline_pipelines():
             "clf__gamma": ["scale", "auto"],
             "clf__kernel": ["rbf"],
         },
-        "SVC + SMOTE": {
-            "smote__k_neighbors": [3, 5],
-            "clf__C": [0.1, 1, 10],
-            "clf__gamma": ["scale", "auto"],
-            "clf__kernel": ["rbf"],
-        },
-        "MLP": {
-            "clf__hidden_layer_sizes": [(50,), (100,)],
-            "clf__activation": ["relu", "tanh"],
-            "clf__alpha": [1e-4, 1e-3],
-            "clf__learning_rate_init": [0.001, 0.01],
-            "clf__max_iter": [1000, 2000],
-            "clf__early_stopping": [True],
-        },
-        "MLP + SMOTE": {
-            "smote__k_neighbors": [3, 5],
-            "clf__hidden_layer_sizes": [(50,), (100,)],
-            "clf__activation": ["relu", "tanh"],
-            "clf__alpha": [1e-4, 1e-3],
-            "clf__learning_rate_init": [0.001, 0.01],
-            "clf__max_iter": [1000, 2000],
-            "clf__early_stopping": [True],
+        "LightGBM": {
+            "clf__n_estimators": [100, 300],
+            "clf__learning_rate": [0.05, 0.1],
+            "clf__num_leaves": [31, 63],
+            "clf__max_depth": [-1, 10],
         },
     }
 
     return models, param_grids
 
+def tolerant_accuracy(y_true, y_pred, tol=1):
+    y_true = np.asarray(y_true)
+    y_pred = np.asarray(y_pred)
+    return np.mean(np.abs(y_true - y_pred) <= tol)
 
-def run_baseline_models(models, X_train, y_train, X_test, y_test,
-                        scoring="f1_macro", verbose=True):
+
+def run_baseline_models(models, X_train, y_train, X_test, y_test, labels=None,
+                        verbose=True):
     """
     Fit & evalueer alle modellen met hun default hyperparameters.
     Fouten per model worden gelogd, maar breken de loop niet.
@@ -279,29 +193,38 @@ def run_baseline_models(models, X_train, y_train, X_test, y_test,
         try:
             model.fit(X_train, y_train)
             y_pred = model.predict(X_test)
+            acc = accuracy_score(y_test, y_pred)
             f1 = f1_score(y_test, y_pred, average="macro")
+            weighted_f1 = f1_score(y_test, y_pred, average="weighted")
+            tacc = tolerant_accuracy(y_test, y_pred, tol=1)
 
             if verbose:
                 print(f"{name} macro-F1 (test): {f1:.4f}")
                 print(classification_report(y_test, y_pred, zero_division=0))
+                print(balanced_accuracy_score(y_test, y_pred))
+
+                plot_confusion(name, y_test, y_pred, labels=labels)
 
             rows.append({
-                "model": name,
+                "algorithm": name,
+                "accuracy": acc,
                 "baseline_f1_macro": f1,
+                "baseline_f1_weighted": weighted_f1,
+                "tolerant_acc_±1": tacc,
             })
 
         except Exception as e:
-            # Log fout maar ga door met volgende model
-            print(f"[SKIPPED] {name} door fout: {e}")
+            # Log error but continue with other models
+            print(f"[SKIPPED] {name} due an error: {e}")
             rows.append({
-                "model": name,
+                "algorithm": name,
                 "baseline_f1_macro": np.nan,
                 "error": str(e),
             })
             continue
 
     results_df = pd.DataFrame(rows).sort_values(
-        "baseline_f1_macro", ascending=False
+        "tolerant_acc_±1", ascending=False
     )
     if verbose:
         print("\nBaseline results (sorted):")
@@ -358,40 +281,48 @@ def gridsearch_top_models(models, param_grids, model_names,
 
             y_pred = grid.predict(X_test)
             test_f1 = f1_score(y_test, y_pred, average="macro")
+            weighted_f1 = f1_score(y_test, y_pred, average="weighted")
+            tacc = tolerant_accuracy(y_test, y_pred, tol=1)
 
             if verbose:
                 print("Best parameters:", grid.best_params_)
                 print("Best CV macro-F1:", grid.best_score_)
                 print("Test macro-F1:", test_f1)
-                print(classification_report(y_test, y_pred))
+                print("Test weighted macro-F1:", weighted_f1)
+                print(classification_report(y_test, y_pred,zero_division=0))
 
             rows.append({
-                "model": name,
-                "best_params": grid.best_params_,
-                "cv_f1_macro": grid.best_score_,
-                "test_f1_macro": test_f1,
+                "gs_model": name,
+                "gs_best_params": grid.best_params_,
+                "gs_cv_f1_macro": grid.best_score_,
+                "gs_test_f1_macro": test_f1,
+                "gs_test_f1_weighted": weighted_f1,
+                "gs_tolerant_acc_±1": tacc,
             })
             grids[name] = grid
 
         except Exception as e:
             print(f"[SKIPPED GridSearch] {name} door fout: {e}")
             rows.append({
-                "model": name,
-                "best_params": None,
-                "cv_f1_macro": np.nan,
-                "test_f1_macro": np.nan,
+                "gs_model": name,
+                "gs_best_params": None,
+                "gs_cv_f1_macro": np.nan,
+                "gs_test_f1_macro": np.nan,
                 "error": str(e),
             })
             continue
 
-    results_df = pd.DataFrame(rows)
+    results_df = pd.DataFrame(rows).sort_values(
+        "gs_test_f1_macro", ascending=False
+    )
     if verbose and not results_df.empty:
         print("\nGridSearch results overview:")
         display(results_df)
 
     return results_df, grids
 
-def get_random_search_space(best_name):
+
+def get_random_search_space(best_name): #NOT USED
     """
     Geeft param_distributions voor RandomizedSearchCV, inclusief SMOTE-varianten.
     Model-specifiek afgestemd op basis van best_name.
@@ -399,20 +330,20 @@ def get_random_search_space(best_name):
     # Detecteer of het al een SMOTE-model is
     has_smote = "+ SMOTE" in best_name
     base_model = best_name.replace(" + SMOTE", "")
-    
+
     param_dist = {}
-    
+
     # === SMOTE-varianten (altijd toevoegen in finale fase) ===
-    if has_smote or base_model in ["RF", "ExtraTrees", "GradBoost", "LogReg", "DecisionTree", "SVC", "KNN", "MLP"]:
+    if has_smote or base_model in ["RF", "ExtraTrees", "GradBoost", "LogReg", "DecisionTree", "SVC", "KNN"]:
         param_dist["smote"] = [
             SMOTE(random_state=42),
             BorderlineSMOTE(random_state=42),
             SVMSMOTE(random_state=42),
         ]
         param_dist["smote__k_neighbors"] = [3, 5, 7]
-    
+
     # === Model-specifieke parameters ===
-    
+
     if base_model == "RF":
         param_dist.update({
             "clf__n_estimators": randint(200, 801),
@@ -421,7 +352,7 @@ def get_random_search_space(best_name):
             "clf__min_samples_leaf": randint(1, 6),
             "clf__max_features": ["sqrt", "log2", None],
         })
-    
+
     elif base_model == "ExtraTrees":
         param_dist.update({
             "clf__n_estimators": randint(200, 801),
@@ -430,7 +361,7 @@ def get_random_search_space(best_name):
             "clf__min_samples_leaf": randint(1, 6),
             "clf__max_features": ["sqrt", "log2", None],
         })
-    
+
     elif base_model == "GradBoost":
         param_dist.update({
             "clf__n_estimators": randint(100, 401),
@@ -439,14 +370,14 @@ def get_random_search_space(best_name):
             "clf__subsample": uniform(0.7, 0.3),
             "clf__min_samples_split": randint(2, 11),
         })
-    
+
     elif base_model == "LogReg":
         param_dist.update({
             "clf__C": uniform(0.01, 100.0),
             "clf__penalty": ["l2"],
             "clf__solver": ["lbfgs"],
         })
-    
+
     elif base_model == "DecisionTree":
         param_dist.update({
             "clf__max_depth": [None, 5, 10, 20, 30],
@@ -454,36 +385,26 @@ def get_random_search_space(best_name):
             "clf__min_samples_leaf": randint(1, 11),
             "clf__criterion": ["gini", "entropy"],
         })
-    
+
     elif base_model == "SVC":
         param_dist.update({
             "clf__C": uniform(0.1, 100.0),
             "clf__gamma": ["scale", "auto", uniform(0.001, 1.0)],
             "clf__kernel": ["rbf", "poly"],
         })
-    
+
     elif base_model == "KNN":
         param_dist.update({
             "clf__n_neighbors": randint(3, 21),
             "clf__weights": ["uniform", "distance"],
             "clf__p": [1, 2],
         })
-    
-    elif base_model == "MLP":
-        param_dist.update({
-            "clf__hidden_layer_sizes": [(50,), (100,), (50, 50)],
-            "clf__activation": ["relu", "tanh"],
-            "clf__alpha": uniform(1e-5, 1e-2),
-            "clf__learning_rate_init": uniform(0.0001, 0.01),
-            "clf__max_iter": [1000, 2000],
-            "clf__early_stopping": [True],
-        })
-    
+
     else:
         raise ValueError(f"Geen RandomizedSearch-space gedefinieerd voor {best_name}")
-    
+
     return param_dist
-    
+
 
 def get_grid_search_space(best_name):
     """
@@ -491,27 +412,26 @@ def get_grid_search_space(best_name):
     Gericht rond bekende goede waarden per model.
     """
     base_model = best_name.replace(" + SMOTE", "")
-    
+
     param_grid = {}
-    
+
     # SMOTE-varianten (geen ADASYN ivm parameter-conflict)
     param_grid["smote"] = [
-        SMOTE(random_state=42),
-        BorderlineSMOTE(random_state=42),
-        SVMSMOTE(random_state=42),
+        SMOTE(random_state=42, k_neighbors=3),
+        BorderlineSMOTE(random_state=42, k_neighbors=3),
+        SVMSMOTE(random_state=42, k_neighbors=3),
     ]
-    param_grid["smote__k_neighbors"] = [3, 5]
-    
+
     # Model-specifieke FINE grids
     if base_model == "RF" or base_model == "ExtraTrees":
         param_grid.update({
-            "clf__n_estimators": [400, 500, 600],
+            "clf__n_estimators": [100, 200, 400],
             "clf__max_depth": [None, 10, 20],
-            "clf__min_samples_split": [2, 5, 8],
-            "clf__min_samples_leaf": [1, 2],
-            "clf__max_features": ["sqrt", None],
+            # "clf__min_samples_split": [2, 5, 8],
+            # "clf__min_samples_leaf": [1, 2],
+            # "clf__max_features": ["sqrt", None],
         })
-    
+
     elif base_model == "GradBoost":
         param_grid.update({
             "clf__n_estimators": [200, 300],
@@ -519,123 +439,106 @@ def get_grid_search_space(best_name):
             "clf__max_depth": [3, 4],
             "clf__subsample": [0.8, 0.9],
         })
-    
+
     elif base_model == "LogReg":
         param_grid.update({
             "clf__C": [0.1, 1.0, 10.0],
         })
-    
+
     elif base_model == "DecisionTree":
         param_grid.update({
             "clf__max_depth": [None, 10, 20],
             "clf__min_samples_split": [2, 5],
             "clf__min_samples_leaf": [1, 2],
         })
-    
-    elif base_model == "MLP":
-        param_grid.update({
-            "clf__hidden_layer_sizes": [(50,), (100,)],
-            "clf__max_iter": [1000],
-            "clf__early_stopping": [True],
-        })
-    
+
     else:
         raise ValueError(f"Geen GridSearch-space voor {best_name}")
-    
+
     return param_grid
 
 
-def finetune_best_model(best_name, best_model, X_train, y_train, X_test, y_test,
-                       cv, method="grid", n_iter=50, scoring="f1_macro", verbose=True):
-    """
-    Tweede-fase finetuning met GridSearchCV of RandomizedSearchCV.
-    
-    Parameters:
-    -----------
-    method : str, default="grid"
-        "grid" voor GridSearchCV (exhaustief) of "random" voor RandomizedSearchCV
-    n_iter : int, default=50
-        Aantal iteraties voor RandomizedSearchCV (genegeerd bij method="grid")
-    """
+def finetune_best_model(
+    best_name,
+    base_pipeline,        # bestaande pipeline zonder SMOTE
+    X_train, y_train,
+    X_test, y_test,
+    cv,
+    searchgrid,
+    method="grid",
+    n_iter=50,
+    scoring="f1_weighted",
+    verbose=True,
+    labels=None,
+):
     print("\n" + "="*70)
-    print(f"FINAL FINETUNING ({method.upper()} + SMOTE/ADASYN): {best_name}")
+    print(f"FINAL FINETUNING ({method.upper()}): {best_name}")
     print("="*70)
-    
-    # Wrap model in ImbPipeline als nodig
-    has_smote = "+ SMOTE" in best_name
-    if has_smote:
-        base_estimator = best_model
-    else:
-        print(f"→ Wrapping {best_name} in ImbPipeline met SMOTE...")
-        steps_with_smote = [("smote", SMOTE(random_state=42))]
-        for step_name, step_obj in best_model.named_steps.items():
-            if step_name == "clf" and hasattr(step_obj, 'class_weight'):
-                new_params = step_obj.get_params()
-                new_params['class_weight'] = None
-                steps_with_smote.append((step_name, step_obj.__class__(**new_params)))
-            else:
-                steps_with_smote.append((step_name, step_obj.__class__(**step_obj.get_params())))
-        base_estimator = ImbPipeline(steps=steps_with_smote)
 
-    # 1. SMOTE-varianten search
-    print("→ [1/2] SMOTE/Borderline/SVMSMOTE...")
-    if method == "grid":
-        param_smote = get_grid_search_space(best_name)  # alleen SMOTE-varianten
-        search_smote = GridSearchCV(base_estimator, param_smote, 
-                                   cv=cv, scoring=scoring, n_jobs=-1, 
-                                   verbose=1 if verbose else 0, refit=True)
-        n_combs_smote = len(list(ParameterGrid(param_smote)))
-    else:
-        param_smote = get_random_search_space(best_name)
-        search_smote = RandomizedSearchCV(base_estimator, param_smote, 
-                                         n_iter=n_iter//2, cv=cv, scoring=scoring, 
-                                         n_jobs=-1, random_state=42, refit=True, verbose=1)
-    
-    search_smote.fit(X_train, y_train)
-    
-    # 2. ADASYN search (aparte pipeline!)
-    print("→ [2/2] ADASYN...")
-    adasyn_pipeline = ImbPipeline([
-        ("smote", ADASYN(random_state=42)),
-        *base_estimator.named_steps.items()
+    # 1. Maak een ImbPipeline met expliciete smote-stap
+    pipe = ImbPipeline([
+        ("smote", SMOTE(random_state=42)),   # placeholder; wordt in grid overschreven
+        *base_pipeline.named_steps.items(),  # scaler, clf, etc.
     ])
 
+    # 2. Definitief zoekrooster (inclusief None voor “geen SMOTE”)
+    param_grid = searchgrid
+
+    # 3. Kies search-object
     if method == "grid":
-        param_adasyn = {
-            "smote__n_neighbors": [3, 5],
-            **{k: v for k, v in param_smote.items() if k.startswith("clf__")}
-        }
-        search_adasyn = GridSearchCV(adasyn_pipeline, param_adasyn, 
-                                    cv=cv, scoring=scoring, n_jobs=-1, 
-                                    verbose=1 if verbose else 0, refit=True)
+        search = GridSearchCV(
+            estimator=pipe,
+            param_grid=param_grid,
+            cv=cv,
+            scoring=scoring,
+            n_jobs=-1,
+            refit=True,
+            verbose=1 if verbose else 0,
+        )
     else:
-        param_adasyn = {
-            "smote__n_neighbors": [3, 5],
-            **{k: v for k, v in param_smote.items() if k.startswith("clf__")}
-        }
-        search_adasyn = RandomizedSearchCV(adasyn_pipeline, param_adasyn, 
-                                          n_iter=n_iter//2, cv=cv, scoring=scoring, 
-                                          n_jobs=-1, random_state=42, refit=True, verbose=1)
-    
-    search_adasyn.fit(X_train, y_train)
-    
-    # Beste kiezen
-    if search_smote.best_score_ >= search_adasyn.best_score_:
-        winner, winner_type = search_smote, "SMOTE-variant"
-    else:
-        winner, winner_type = search_adasyn, "ADASYN"
-    
-    y_pred = winner.predict(X_test)
-    test_f1 = f1_score(y_test, y_pred, average="macro")
-    
+        search = RandomizedSearchCV(
+            estimator=pipe,
+            param_distributions=param_grid,
+            n_iter=n_iter,
+            cv=cv,
+            scoring=scoring,
+            n_jobs=-1,
+            refit=True,
+            verbose=1 if verbose else 0,
+            random_state=42,
+        )
+
+    search.fit(X_train, y_train)
+
+    # 4. Testset-scores
+    y_pred = search.predict(X_test)
+    macro_f1 = f1_score(y_test, y_pred, average="macro")
+    weighted_f1 = f1_score(y_test, y_pred, average="weighted")
+    tacc = tolerant_accuracy(y_test, y_pred, tol=1)
+
+    # 5. Resultentabel per grid-entry
+    cv_res = search.cv_results_
+    ft_df = pd.DataFrame({
+        "params": cv_res["params"],
+        "mean_test_score": cv_res["mean_test_score"],
+        "std_test_score": cv_res["std_test_score"],
+        "rank_test_score": cv_res["rank_test_score"],
+    }).sort_values("mean_test_score", ascending=False).reset_index(drop=True)
+
+    # overzicht van winnende combi
     if verbose:
         print("\n" + "="*70)
-        print(f"WINNER: {winner_type}")
-        print(f"SMOTE CV: {search_smote.best_score_:.4f} | ADASYN CV: {search_adasyn.best_score_:.4f}")
-        print("Best parameters:", winner.best_params_)
-        print(f"Best CV macro-F1: {winner.best_score_:.4f}")
-        print(f"Test macro-F1: {test_f1:.4f}")
+        print("Finetuning results overview:")
+        display(pd.DataFrame([{
+            "ft_model": best_name,
+            "ft_best_params": search.best_params_,
+            "ft_cv_f1_macro": search.best_score_,
+            "ft_test_f1_macro": macro_f1,
+            "ft_test_f1_weighted": weighted_f1,
+            "ft_tolerant_acc_±1": tacc,
+        }]))
         print("\nClassification Report:")
-        print(classification_report(y_test, y_pred))
-    
-    return winner, y_pred, test_f1
+        print(classification_report(y_test, y_pred, zero_division=0))
+        plot_confusion(best_name, y_test, y_pred, labels=labels)
+
+    return search, y_pred, ft_df
