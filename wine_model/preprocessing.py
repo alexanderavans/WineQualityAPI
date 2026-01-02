@@ -3,18 +3,16 @@ Preprocessing utilities for Wine Quality ML pipeline.
 Contains data loading, splitting, visualization, and evaluation functions.
 """
 
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
 from collections import Counter
 
-from sklearn.model_selection import train_test_split
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import seaborn as sns
+
 from sklearn.inspection import permutation_importance
-from sklearn.metrics import (
-    f1_score, classification_report, confusion_matrix, 
-    accuracy_score
-)
+from sklearn.metrics import confusion_matrix
+from sklearn.model_selection import train_test_split
 
 
 def load_wine_data(dataset="white"):
@@ -32,20 +30,16 @@ def load_wine_data(dataset="white"):
         Wine data with spaces in column names replaced by underscores.
     """
     if dataset == "white":
-        df = pd.read_csv("data/winequality-white.csv", sep=";")
+        df = pd.read_csv("data/winequality-white.csv", sep=";", decimal=",")
     elif dataset == "red":
-        df = pd.read_csv("data/winequality-red.csv", sep=";")
-    elif dataset == "combined":
-        df_white = pd.read_csv("data/winequality-white.csv", sep=";")
-        df_red = pd.read_csv("data/winequality-red.csv", sep=";")
-        df = pd.concat([df_white, df_red], axis=0, ignore_index=True)
+        df = pd.read_csv("data/winequality-red.csv", sep=";", decimal=",")
     else:
         raise ValueError("Unknown dataset. Choose from 'white', 'red', or 'combined'.")
     
     # Standardize column names: replace spaces with underscores
     df.columns = df.columns.str.replace(" ", "_")
-    suffix = dataset
-    return df, suffix
+
+    return df
 
 
 def split_features_target(df, target_col="quality"):
@@ -80,7 +74,7 @@ def split_features_target(df, target_col="quality"):
     return X_train, X_test, y_train, y_test, feature_cols
 
 
-def plot_numeric_histograms(df, features=None, ncols=2, bins=20, title_prefix=""):
+def plot_numeric_histograms(df, features=None, ncols=3, bins=20, title_prefix=""):
     """
     Displays histograms for all numeric features in a DataFrame.
     Useful for inspecting distributions, skewness, and potential outliers.
@@ -136,7 +130,44 @@ def scatter_feature_pairs(df, feature_pairs, hue=None):
         plt.show()
 
 
-def plot_feature_vs_quality(df, features=None, target_col="quality", ncols=2, title_prefix=""):
+def scatter_feature_pairs_subplots(df, feature_pairs, hue=None, ncols=2):
+    """
+    Scatterplots in subplots voor lijst van (x, y)-pairs.
+
+    Parameters:
+    - df: pandas DataFrame
+    - feature_pairs: [('alcohol', 'pH'), ('sulphates', 'density'), ...]
+    - hue: optionele kleurkolom
+    - ncols: aantal kolommen (default 2)
+    """
+    nrows = (len(feature_pairs) + ncols - 1) // ncols  # auto rows
+
+    fig, axes = plt.subplots(nrows, ncols, figsize=(5 * ncols, 4 * nrows))
+    if nrows == 1:
+        axes = np.array(axes).reshape(1, -1)
+
+    for idx, (x, y) in enumerate(feature_pairs):
+        ax = axes[idx // ncols, idx % ncols]
+        if hue is None:
+            sns.scatterplot(data=df, x=x, y=y,
+                            alpha=0.6, ax=ax)
+        else:
+            sns.scatterplot(data=df, x=x, y=y, hue=hue,
+                            palette="hls", alpha=0.6, ax=ax)
+        # regressielijn over alle punten
+        sns.regplot(data=df, x=x, y=y, scatter=False, ci=None, color="red", ax=ax)
+        ax.set_title(f"{y} vs {x}")
+        ax.grid(True, alpha=0.3)
+
+        # lege assen weg
+    for idx in range(len(feature_pairs), nrows * ncols):
+        fig.delaxes(axes.flat[idx])
+
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_feature_vs_quality(df, features=None, target_col="quality", ncols=3, title_prefix=""):
     """
     Plots boxplots for numerical features against a target column.
     Helps visualize how feature distributions change across target values.
@@ -325,52 +356,47 @@ def plot_permutation_importance(model, X, y, n_repeats=10, scoring="f1_macro",
     
     return imp_df
 
-
 def plot_class_distance(model, X, y_true, title="Prediction vs Actual Class Distance"):
-    """
-    Computes and visualizes absolute difference between predicted and actual class labels.
-    Helps understand how close misclassified samples are to the correct class.
-    
-    Parameters:
-    -----------
-    model : estimator
-        Trained model.
-    X : DataFrame
-        Feature data (preprocessed as used in training).
-    y_true : Series or array-like
-        True class labels.
-    title : str
-        Plot title.
-    
-    Returns:
-    --------
-    diff : Series
-        Absolute differences between predictions and truth.
-    diff_counts : Series
-        Count per difference value.
-    """
     y_pred = model.predict(X)
-    
-    # Ensure matching index types
-    if hasattr(y_true, 'index'):
+
+    if hasattr(y_true, "index"):
         y_pred_s = pd.Series(y_pred, index=y_true.index).astype(int)
         y_true_s = y_true.astype(int)
     else:
         y_pred_s = pd.Series(y_pred).astype(int)
         y_true_s = pd.Series(y_true).astype(int)
-    
-    # Absolute difference
+
+    # absolute verschil (bestaande plot)
     diff = (y_pred_s - y_true_s).abs()
     diff_counts = diff.value_counts().sort_index()
-    
-    print(diff_counts)
-    
-    plt.figure(figsize=(5, 4))
-    sns.barplot(x=diff_counts.index, y=diff_counts.values, color="salmon")
-    plt.xlabel("Absolute difference (|predicted - actual|)")
-    plt.ylabel("Number of samples")
-    plt.title(title)
+
+    total = diff_counts.sum()
+    diff_pct = (diff_counts / total * 100).round(1)
+
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4), sharey=False)
+
+    # Plot 1: absolute verschil in aantallen + percentages als labels
+    sns.barplot(x=diff_counts.index, y=diff_counts.values, color="salmon", ax=axes[0])
+    for x, (cnt, pct) in enumerate(zip(diff_counts.values, diff_pct.values)):
+        axes[0].text(x, cnt, f"{pct}%", ha="center", va="bottom", fontsize=8)
+    axes[0].set_xlabel("|predicted - actual|")
+    axes[0].set_ylabel("Number of samples")
+    axes[0].set_title(title)
+
+    # Nieuw: signed verschil (te laag/te hoog)
+    signed_diff = (y_pred_s - y_true_s)
+    signed_counts = signed_diff.value_counts().sort_index()
+    signed_pct = (signed_counts / signed_counts.sum() * 100).round(1)
+
+    sns.barplot(x=signed_counts.index, y=signed_counts.values, color="steelblue", ax=axes[1])
+    for x, (cnt, pct) in enumerate(zip(signed_counts.values, signed_pct.values)):
+        axes[1].text(x, cnt, f"{pct}%", ha="center", va="bottom", fontsize=8)
+
+    axes[1].set_xlabel("predicted - actual\n(negative = too low, positive = too high)")
+    axes[1].set_ylabel("Number of samples")
+    axes[1].set_title("Error direction")
+
     plt.tight_layout()
     plt.show()
-    
-    return diff, diff_counts
+
+    return diff, diff_counts, signed_diff, signed_counts
