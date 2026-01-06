@@ -1,7 +1,10 @@
 # Test your FastAPI endpoints
 ####
 
-POST http://127.0.0.1:8000/white/predict
+GET http://127.0.0.1:8000/health
+###
+
+POST http://127.0.0.1:8000/predict/white
 Content-Type: application/json
 
 {
@@ -10,5 +13,41 @@ Content-Type: application/json
   "residual_sugar": 5.2,
   "free_sulfur_dioxide": 34,
   "density": 0.9937
+}
+###
+
+POST https://wine.alexanderboogaard.nl/predict/white
+Content-Type: application/json
+
+{
+  "alcohol": 14.4,
+  "volatile_acidity": 0.28,
+  "residual_sugar": 5.2,
+  "free_sulfur_dioxide": 34,
+  "density": 0.9937
+}
+###
+
+POST http://127.0.0.1:8000/predict/red
+Content-Type: application/json
+
+{
+  "alcohol": 14.4,
+  "volatile_acidity": 0.28,
+  "citric_acid": 0.3,
+  "pH": 3.3,
+  "sulphates": 0.5
+}
+###
+
+POST https://wine.alexanderboogaard.nl/predict/red
+Content-Type: application/json
+
+{
+  "alcohol": 14.4,
+  "volatile_acidity": 0.28,
+  "citric_acid": 0.3,
+  "pH": 3.3,
+  "sulphates": 0.5
 }
 ###
