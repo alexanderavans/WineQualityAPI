@@ -85,11 +85,11 @@ def health_check():
         },
     }
 
-@app.post("/red/predict")
+@app.post("/predict/red")
 def predict_red(sample: RedWineSample):
     return _predict_for_model("red", sample)
 
 
-@app.post("/white/predict")
+@app.post("/predict/white")
 def predict_white(sample: WhiteWineSample):
     return _predict_for_model("white", sample)
